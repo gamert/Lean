@@ -1,11 +1,11 @@
 ﻿/*
  * QUANTCONNECT.COM - Democratizing Finance, Empowering Individuals.
  * Lean Algorithmic Trading Engine v2.0. Copyright 2014 QuantConnect Corporation.
- * 
- * Licensed under the Apache License, Version 2.0 (the "License"); 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -22,9 +22,8 @@ using System.Runtime.InteropServices;
 using System.Security.Policy;
 using QuantConnect.Interfaces;
 using QuantConnect.Logging;
-using Python.Runtime;
 using QuantConnect.AlgorithmFactory.Python.Wrappers;
-using QuantConnect.Util;
+using QuantConnect.Python;
 
 namespace QuantConnect.AlgorithmFactory
 {
@@ -80,7 +79,7 @@ namespace QuantConnect.AlgorithmFactory
         /// </param>
         /// <param name="multipleTypeNameResolverFunction">
         /// Used to resolve multiple type names found in assembly to a single type name, if null, defaults to names => names.SingleOrDefault()
-        /// 
+        ///
         /// When we search an assembly for derived types of IAlgorithm, sometimes the assembly will contain multiple matching types. This is the case
         /// for the QuantConnect.Algorithm assembly in this solution.  In order to pick the correct type, consumers must specify how to pick the type,
         /// that's what this function does, it picks the correct type from the list of types found within the assembly.
@@ -96,9 +95,6 @@ namespace QuantConnect.AlgorithmFactory
 
             _loaderTimeLimit = loaderTimeLimit;
             _multipleTypeNameResolverFunction = multipleTypeNameResolverFunction;
-
-            //Set the python path for loading python algorithms.
-            Environment.SetEnvironmentVariable("PYTHONPATH", Environment.CurrentDirectory);
         }
 
 
@@ -108,15 +104,15 @@ namespace QuantConnect.AlgorithmFactory
         /// <param name="assemblyPath">Location of the DLL</param>
         /// <param name="algorithmInstance">Output algorithm instance</param>
         /// <param name="errorMessage">Output error message on failure</param>
-        /// <returns>Bool true on successfully loading the class.</returns>        
-        public bool TryCreateAlgorithmInstance(string assemblyPath, out IAlgorithm algorithmInstance, out string errorMessage) 
+        /// <returns>Bool true on successfully loading the class.</returns>
+        public bool TryCreateAlgorithmInstance(string assemblyPath, out IAlgorithm algorithmInstance, out string errorMessage)
         {
             //Default initialisation of Assembly.
             algorithmInstance = null;
             errorMessage = "";
 
             //First most basic check:
-            if (!File.Exists(assemblyPath)) 
+            if (!File.Exists(assemblyPath))
             {
                 return false;
             }
@@ -158,14 +154,21 @@ namespace QuantConnect.AlgorithmFactory
             var pythonFile = new FileInfo(assemblyPath);
             var moduleName = pythonFile.Name.Replace(".pyc", "").Replace(".py", "");
 
-            //Help python find the module
-            Environment.SetEnvironmentVariable("PYTHONPATH", pythonFile.DirectoryName);
+            // Set the python path for loading python algorithms.
+            var pythonPath = new[]
+            {
+                pythonFile.Directory.FullName,
+                new DirectoryInfo(Environment.CurrentDirectory).FullName,
+                Environment.GetEnvironmentVariable("PYTHONPATH")
+            };
+
+            Environment.SetEnvironmentVariable("PYTHONPATH", string.Join(OS.IsLinux ? ":" : ";", pythonPath));
 
             try
             {
-                algorithmInstance = new AlgorithmPythonWrapper(moduleName);
+                PythonInitializer.Initialize();
 
-                PythonEngine.BeginAllowThreads();
+                algorithmInstance = new AlgorithmPythonWrapper(moduleName);
             }
             catch (Exception e)
             {
@@ -179,7 +182,7 @@ namespace QuantConnect.AlgorithmFactory
         }
 
         /// <summary>
-        /// Create a generic IL algorithm 
+        /// Create a generic IL algorithm
         /// </summary>
         /// <param name="assemblyPath"></param>
         /// <param name="algorithmInstance"></param>
@@ -193,7 +196,7 @@ namespace QuantConnect.AlgorithmFactory
             try
             {
                 byte[] debugInformationBytes = null;
-                
+
                 // if the assembly is located in the base directory then don't bother loading the pdbs
                 // manually, they'll be loaded automatically by the .NET runtime.
                 var directoryName = new FileInfo(assemblyPath).DirectoryName;
@@ -233,7 +236,7 @@ namespace QuantConnect.AlgorithmFactory
                     return false;
                 }
 
-                //Get the list of extention classes in the library: 
+                //Get the list of extention classes in the library:
                 var types = GetExtendedTypeNames(assembly);
                 Log.Debug("Loader.TryCreateILAlgorithm(): Assembly types: " + string.Join(",", types));
 
@@ -252,8 +255,8 @@ namespace QuantConnect.AlgorithmFactory
 
                     if (string.IsNullOrEmpty(types[0]))
                     {
-                        errorMessage = "Please verify algorithm type name matches the algorithm name in the configuration file. Unable to resolve multiple algorithm types to a single type.";
-                        Log.Error("Loader.TryCreateILAlgorithm(): Failed resolving multiple algorithm types to a single type.");
+                        errorMessage = "Algorithm type name not found, or unable to resolve multiple algorithm types to a single type. Please verify algorithm type name matches the algorithm name in the configuration file and that there is one and only one class derived from QCAlgorithm.";
+                        Log.Error($"Loader.TryCreateILAlgorithm(): {errorMessage}");
                         return false;
                     }
                 }
@@ -274,8 +277,10 @@ namespace QuantConnect.AlgorithmFactory
             }
             catch (Exception err)
             {
-                Log.Error(err);
-                if (err.InnerException != null) errorMessage = err.InnerException.Message;
+                errorMessage = "Algorithm type name not found, or unable to resolve multiple algorithm types to a single type. Please verify algorithm type name matches the algorithm name in the configuration file and that there is one and only one class derived from QCAlgorithm.";
+                errorMessage += err.InnerException == null ? err.Message : err.InnerException.Message;
+                Log.Error($"Loader.TryCreateILAlgorithm(): {errorMessage}");
+                return false;
             }
 
             return true;
@@ -286,7 +291,7 @@ namespace QuantConnect.AlgorithmFactory
         /// </summary>
         /// <param name="assembly">Assembly dll we're loading.</param>
         /// <returns>String list of types available.</returns>
-        public static List<string> GetExtendedTypeNames(Assembly assembly) 
+        public static List<string> GetExtendedTypeNames(Assembly assembly)
         {
             var types = new List<string>();
             try
@@ -332,7 +337,7 @@ namespace QuantConnect.AlgorithmFactory
         /// <param name="ramLimit">Limit of the RAM for this process</param>
         /// <param name="algorithmInstance">Output algorithm instance</param>
         /// <param name="errorMessage">Output error message on failure</param>
-        /// <returns>bool success</returns>     
+        /// <returns>bool success</returns>
         public bool TryCreateAlgorithmInstanceWithIsolator(string assemblyPath, int ramLimit, out IAlgorithm algorithmInstance, out string errorMessage)
         {
             IAlgorithm instance = null;
@@ -343,7 +348,7 @@ namespace QuantConnect.AlgorithmFactory
             var complete = isolator.ExecuteWithTimeLimit(_loaderTimeLimit, () =>
             {
                 success = TryCreateAlgorithmInstance(assemblyPath, out instance, out error);
-            }, ramLimit); 
+            }, ramLimit, sleepIntervalMillis:50);
 
             algorithmInstance = instance;
             errorMessage = error;
@@ -364,7 +369,7 @@ namespace QuantConnect.AlgorithmFactory
         /// <remarks>Not used in lean engine. Running the library in an app domain is 10x slower.</remarks>
         /// <seealso cref="AppDomain.CreateDomain(string, Evidence, string, string, bool, AppDomainInitializer, string[])"/>
         public void Unload() {
-            if (appDomain != null) 
+            if (appDomain != null)
             {
                 AppDomain.Unload(appDomain);
                 appDomain = null;

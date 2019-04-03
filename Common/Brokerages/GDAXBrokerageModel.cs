@@ -28,7 +28,7 @@ namespace QuantConnect.Brokerages
     /// </summary>
     public class GDAXBrokerageModel : DefaultBrokerageModel
     {
-        private static BrokerageMessageEvent _message = new BrokerageMessageEvent(BrokerageMessageType.Warning, 0, "Brokerage does not support update. You must cancel and re-create instead.");
+        private readonly BrokerageMessageEvent _message = new BrokerageMessageEvent(BrokerageMessageType.Warning, 0, "Brokerage does not support update. You must cancel and re-create instead.");
 
         // https://support.gdax.com/customer/portal/articles/2725970-trading-rules
         private static readonly Dictionary<string, decimal> MinimumOrderSizes = new Dictionary<string, decimal>
@@ -51,6 +51,9 @@ namespace QuantConnect.Brokerages
             { "LTCGBP", 0.1m },
             { "LTCBTC", 0.1m }
         };
+
+        // https://blog.coinbase.com/coinbase-pro-market-structure-update-fbd9d49f43d7
+        private readonly DateTime _stopMarketOrderSupportEndDate = new DateTime(2019, 3, 23, 1, 0, 0);
 
         /// <summary>
         /// Initializes a new instance of the <see cref="GDAXBrokerageModel"/> class
@@ -130,7 +133,7 @@ namespace QuantConnect.Brokerages
             if (security.Type != SecurityType.Crypto)
             {
                 message = new BrokerageMessageEvent(BrokerageMessageType.Warning, "NotSupported",
-                    "This model does not support " + security.Type + " security type."
+                    $"The {nameof(GDAXBrokerageModel)} does not support {security.Type} security type."
                 );
 
                 return false;
@@ -139,7 +142,25 @@ namespace QuantConnect.Brokerages
             if (order.Type != OrderType.Limit && order.Type != OrderType.Market && order.Type != OrderType.StopMarket)
             {
                 message = new BrokerageMessageEvent(BrokerageMessageType.Warning, "NotSupported",
-                    "This model does not support " + order.Type + " order type."
+                    $"The {nameof(GDAXBrokerageModel)} does not support {order.Type} order type."
+                );
+
+                return false;
+            }
+
+            if (order.Type == OrderType.StopMarket && order.Time >= _stopMarketOrderSupportEndDate)
+            {
+                message = new BrokerageMessageEvent(BrokerageMessageType.Warning, "NotSupported",
+                    $"Stop Market orders are no longer supported since {_stopMarketOrderSupportEndDate}."
+                );
+
+                return false;
+            }
+
+            if (order.TimeInForce != TimeInForce.GoodTilCanceled)
+            {
+                message = new BrokerageMessageEvent(BrokerageMessageType.Warning, "NotSupported",
+                    $"The {nameof(GDAXBrokerageModel)} does not support {order.TimeInForce.GetType().Name} time in force."
                 );
 
                 return false;
@@ -163,9 +184,8 @@ namespace QuantConnect.Brokerages
         /// For cash accounts, leverage = 1 is used.
         /// </summary>
         /// <param name="security">The security to get a buying power model for</param>
-        /// <param name="accountType">The account type</param>
         /// <returns>The buying power model for this brokerage/security</returns>
-        public override IBuyingPowerModel GetBuyingPowerModel(Security security, AccountType accountType)
+        public override IBuyingPowerModel GetBuyingPowerModel(Security security)
         {
             // margin trading is not currently supported by GDAX
             return new CashBuyingPowerModel();

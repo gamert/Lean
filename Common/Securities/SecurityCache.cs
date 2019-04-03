@@ -15,7 +15,6 @@
 
 using System;
 using System.Collections.Concurrent;
-using System.Linq;
 using QuantConnect.Data;
 using QuantConnect.Data.Market;
 
@@ -106,6 +105,13 @@ namespace QuantConnect.Securities
                 return;
             }
 
+            var tick = data as Tick;
+            if (tick?.TickType == TickType.OpenInterest)
+            {
+                OpenInterest = (long)tick.Value;
+                return;
+            }
+
             // Only cache non fill-forward data.
             if (data.IsFillForward) return;
 
@@ -122,22 +128,25 @@ namespace QuantConnect.Securities
                 _lastData = data;
             }
 
-
-            var tick = data as Tick;
             if (tick != null)
             {
                 if (tick.Value != 0) Price = tick.Value;
 
-                if (tick.BidPrice != 0) BidPrice = tick.BidPrice;
-                if (tick.BidSize != 0) BidSize = tick.BidSize;
+                if (tick.TickType == TickType.Trade && tick.Quantity != 0)
+                {
+                    Volume = tick.Quantity;
+                }
+                if (tick.TickType == TickType.Quote)
+                {
+                    if (tick.BidPrice != 0) BidPrice = tick.BidPrice;
+                    if (tick.BidSize != 0) BidSize = tick.BidSize;
 
-                if (tick.AskPrice != 0) AskPrice = tick.AskPrice;
-                if (tick.AskSize != 0) AskSize = tick.AskSize;
-
-                if (tick.Quantity != 0) Volume = tick.Quantity;
-
+                    if (tick.AskPrice != 0) AskPrice = tick.AskPrice;
+                    if (tick.AskSize != 0) AskSize = tick.AskSize;
+                }
                 return;
             }
+
             var bar = data as IBar;
             if (bar != null)
             {
@@ -158,6 +167,7 @@ namespace QuantConnect.Securities
                 {
                     if (tradeBar.Volume != 0) Volume = tradeBar.Volume;
                 }
+
                 var quoteBar = bar as QuoteBar;
                 if (quoteBar != null)
                 {
@@ -168,10 +178,19 @@ namespace QuantConnect.Securities
                     if (quoteBar.LastAskSize != 0) AskSize = quoteBar.LastAskSize;
                 }
             }
-            else
+            else if (data.DataType != MarketDataType.Auxiliary)
             {
                 Price = data.Price;
             }
+        }
+
+        /// <summary>
+        /// Stores the specified data instance in the cache WITHOUT updating any of the cache properties, such as Price
+        /// </summary>
+        /// <param name="data"></param>
+        public void StoreData(BaseData data)
+        {
+            _dataByType[data.GetType()] = data;
         }
 
         /// <summary>

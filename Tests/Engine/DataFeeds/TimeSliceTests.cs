@@ -1,11 +1,11 @@
 ﻿/*
  * QUANTCONNECT.COM - Democratizing Finance, Empowering Individuals.
  * Lean Algorithmic Trading Engine v2.0. Copyright 2014 QuantConnect Corporation.
- * 
- * Licensed under the Apache License, Version 2.0 (the "License"); 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -17,8 +17,8 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using NodaTime;
 using NUnit.Framework;
-using QuantConnect.Algorithm.CSharp;
 using QuantConnect.Data;
 using QuantConnect.Data.Auxiliary;
 using QuantConnect.Data.Custom;
@@ -26,30 +26,42 @@ using QuantConnect.Data.Market;
 using QuantConnect.Data.UniverseSelection;
 using QuantConnect.Lean.Engine.DataFeeds;
 using QuantConnect.Securities;
+using QuantConnect.Securities.Equity;
+using QuantConnect.Securities.Option;
+using QuandlFuture = QuantConnect.Algorithm.CSharp.QCUQuandlFutures.QuandlFuture;
 
 namespace QuantConnect.Tests.Engine.DataFeeds
 {
     [TestFixture]
     public class TimeSliceTests
     {
+        private TimeSliceFactory _timeSliceFactory;
+        [SetUp]
+        public void SetUp()
+        {
+            _timeSliceFactory = new TimeSliceFactory(TimeZones.Utc);
+        }
+
         [Test]
         public void HandlesTicks_ExpectInOrderWithNoDuplicates()
         {
             var subscriptionDataConfig = new SubscriptionDataConfig(
-                typeof(Tick), 
-                Symbols.EURUSD, 
-                Resolution.Tick, 
-                TimeZones.Utc, 
-                TimeZones.Utc, 
-                true, 
-                true, 
+                typeof(Tick),
+                Symbols.EURUSD,
+                Resolution.Tick,
+                TimeZones.Utc,
+                TimeZones.Utc,
+                true,
+                true,
                 false);
 
             var security = new Security(
-                SecurityExchangeHours.AlwaysOpen(TimeZones.Utc), 
-                subscriptionDataConfig, 
-                new Cash(CashBook.AccountCurrency, 0, 1m), 
-                SymbolProperties.GetDefault(CashBook.AccountCurrency));
+                SecurityExchangeHours.AlwaysOpen(TimeZones.Utc),
+                subscriptionDataConfig,
+                new Cash(Currencies.USD, 0, 1m),
+                SymbolProperties.GetDefault(Currencies.USD),
+                ErrorCurrencyConverter.Instance
+            );
 
             DateTime refTime = DateTime.UtcNow;
 
@@ -58,12 +70,11 @@ namespace QuantConnect.Tests.Engine.DataFeeds
                 .Select(i => new Tick(refTime.AddSeconds(i), Symbols.EURUSD, 1.3465m, 1.34652m))
                 .ToArray();
 
-            IEnumerable<TimeSlice> timeSlices = rawTicks.Select(t => TimeSlice.Create(
+            IEnumerable<TimeSlice> timeSlices = rawTicks.Select(t => _timeSliceFactory.Create(
                 t.Time,
-                TimeZones.Utc,
-                new CashBook(),
-                new List<DataFeedPacket> {new DataFeedPacket(security, subscriptionDataConfig, new List<BaseData>() {t})},
-                new SecurityChanges(Enumerable.Empty<Security>(), Enumerable.Empty<Security>())));
+                new List<DataFeedPacket> { new DataFeedPacket(security, subscriptionDataConfig, new List<BaseData>() { t }) },
+                new SecurityChanges(Enumerable.Empty<Security>(), Enumerable.Empty<Security>()),
+                new Dictionary<Universe, BaseDataCollection>()));
 
             Tick[] timeSliceTicks = timeSlices.SelectMany(ts => ts.Slice.Ticks.Values.SelectMany(x => x)).ToArray();
 
@@ -96,22 +107,27 @@ namespace QuantConnect.Tests.Engine.DataFeeds
             var security1 = new Security(
                 SecurityExchangeHours.AlwaysOpen(TimeZones.Utc),
                 subscriptionDataConfig1,
-                new Cash(CashBook.AccountCurrency, 0, 1m),
-                SymbolProperties.GetDefault(CashBook.AccountCurrency));
+                new Cash(Currencies.USD, 0, 1m),
+                SymbolProperties.GetDefault(Currencies.USD),
+                ErrorCurrencyConverter.Instance
+            );
 
             var security2 = new Security(
                 SecurityExchangeHours.AlwaysOpen(TimeZones.Utc),
                 subscriptionDataConfig1,
-                new Cash(CashBook.AccountCurrency, 0, 1m),
-                SymbolProperties.GetDefault(CashBook.AccountCurrency));
+                new Cash(Currencies.USD, 0, 1m),
+                SymbolProperties.GetDefault(Currencies.USD),
+                ErrorCurrencyConverter.Instance
+            );
 
-            var timeSlice = TimeSlice.Create(DateTime.UtcNow, TimeZones.Utc, new CashBook(),
+            var timeSlice = _timeSliceFactory.Create(DateTime.UtcNow,
                 new List<DataFeedPacket>
                 {
                     new DataFeedPacket(security1, subscriptionDataConfig1, new List<BaseData> {new QuandlFuture { Symbol = symbol1, Time = DateTime.UtcNow.Date, Value = 15 } }),
                     new DataFeedPacket(security2, subscriptionDataConfig2, new List<BaseData> {new QuandlFuture { Symbol = symbol2, Time = DateTime.UtcNow.Date, Value = 20 } }),
                 },
-                new SecurityChanges(Enumerable.Empty<Security>(), Enumerable.Empty<Security>()));
+                new SecurityChanges(Enumerable.Empty<Security>(), Enumerable.Empty<Security>()),
+                new Dictionary<Universe, BaseDataCollection>());
 
             Assert.AreEqual(2, timeSlice.CustomData.Count);
 
@@ -137,12 +153,14 @@ namespace QuantConnect.Tests.Engine.DataFeeds
             var security = new Security(
                 SecurityExchangeHours.AlwaysOpen(TimeZones.Utc),
                 subscriptionDataConfig,
-                new Cash(CashBook.AccountCurrency, 0, 1m),
-                SymbolProperties.GetDefault(CashBook.AccountCurrency));
+                new Cash(Currencies.USD, 0, 1m),
+                SymbolProperties.GetDefault(Currencies.USD),
+                ErrorCurrencyConverter.Instance
+            );
 
             var refTime = DateTime.UtcNow;
 
-            var timeSlice = TimeSlice.Create(refTime, TimeZones.Utc, new CashBook(),
+            var timeSlice = _timeSliceFactory.Create(refTime,
                 new List<DataFeedPacket>
                 {
                     new DataFeedPacket(security, subscriptionDataConfig, new List<BaseData>
@@ -151,7 +169,8 @@ namespace QuantConnect.Tests.Engine.DataFeeds
                         new DailyFx { Symbol = symbol, Time = refTime, Title = "Item 2" },
                     }),
                 },
-                new SecurityChanges(Enumerable.Empty<Security>(), Enumerable.Empty<Security>()));
+                new SecurityChanges(Enumerable.Empty<Security>(), Enumerable.Empty<Security>()),
+                new Dictionary<Universe, BaseDataCollection>());
 
             Assert.AreEqual(1, timeSlice.CustomData.Count);
 
@@ -196,10 +215,89 @@ namespace QuantConnect.Tests.Engine.DataFeeds
             }
         }
 
+        [Test]
+        public void TimeSliceCreateDoesNotThrowNullReferanceWhenUnderlyingIsNull()
+        {
+            var optionSymbol = Symbol.Create("SVXY", SecurityType.Option, Market.USA);
+            var underlyingSecurity = new Equity(
+                optionSymbol.Underlying,
+                SecurityExchangeHours.AlwaysOpen(DateTimeZone.Utc),
+                new Cash(Currencies.USD, 0, 1),
+                SymbolProperties.GetDefault(Currencies.USD),
+                ErrorCurrencyConverter.Instance
+            );
+            var subscriptionDataConfig = new SubscriptionDataConfig(
+                typeof(DailyFx), optionSymbol, Resolution.Daily, TimeZones.Utc, TimeZones.Utc, true, true, false, isCustom: true);
+
+            var optionSecurity = new Option(
+                optionSymbol,
+                SecurityExchangeHours.AlwaysOpen(TimeZones.Utc),
+                new Cash(Currencies.USD, 0, 1m),
+                new OptionSymbolProperties(SymbolProperties.GetDefault(Currencies.USD)),
+                ErrorCurrencyConverter.Instance
+            );
+
+            var refTime = DateTime.UtcNow;
+            var timeSlice = _timeSliceFactory.Create(refTime,
+                new List<DataFeedPacket>
+                {
+                    new DataFeedPacket(optionSecurity, subscriptionDataConfig, new List<BaseData>
+                    {
+                        new QuoteBar { Symbol = optionSymbol, Time = refTime, Value = 1, Ask = new Bar(1,1,1,1), Bid = new Bar(1,1,1,1) }
+                    })
+                },
+                new SecurityChanges(Enumerable.Empty<Security>(), Enumerable.Empty<Security>()),
+                new Dictionary<Universe, BaseDataCollection>());
+            Assert.AreEqual(timeSlice.SecurityChanges.Count, 0);
+        }
+
+        [Test]
+        public void TimeSliceCreateDoesNotThrowNullReferanceWhenUnderlyingSecurityLastDataIsNull()
+        {
+            var optionSymbol = Symbol.Create("SVXY", SecurityType.Option, Market.USA);
+            var underlyingSecurity = new Equity(
+                optionSymbol.Underlying,
+                SecurityExchangeHours.AlwaysOpen(DateTimeZone.Utc),
+                new Cash(Currencies.USD, 0, 1),
+                SymbolProperties.GetDefault(Currencies.USD),
+                ErrorCurrencyConverter.Instance
+            );
+            var subscriptionDataConfig = new SubscriptionDataConfig(
+                typeof(DailyFx), optionSymbol, Resolution.Daily, TimeZones.Utc, TimeZones.Utc, true, true, false, isCustom: true);
+
+            var optionSecurity = new Option(
+                    optionSymbol,
+                    SecurityExchangeHours.AlwaysOpen(TimeZones.Utc),
+                    new Cash(Currencies.USD, 0, 1m),
+                    new OptionSymbolProperties(SymbolProperties.GetDefault(Currencies.USD)),
+                    ErrorCurrencyConverter.Instance
+                )
+                {Underlying = underlyingSecurity};
+
+            var refTime = DateTime.UtcNow;
+            var timeSlice = _timeSliceFactory.Create(refTime,
+                new List<DataFeedPacket>
+                {
+                    new DataFeedPacket(optionSecurity, subscriptionDataConfig, new List<BaseData>
+                    {
+                        new QuoteBar { Symbol = optionSymbol, Time = refTime, Value = 1, Ask = new Bar(1,1,1,1), Bid = new Bar(1,1,1,1) }
+                    })
+                },
+                new SecurityChanges(Enumerable.Empty<Security>(), Enumerable.Empty<Security>()),
+                new Dictionary<Universe, BaseDataCollection>());
+            Assert.AreEqual(timeSlice.SecurityChanges.Count, 0);
+        }
+
         private IEnumerable<Slice> GetSlices(Symbol symbol, int initialVolume)
         {
             var subscriptionDataConfig = new SubscriptionDataConfig(typeof(ZipEntryName), symbol, Resolution.Second, TimeZones.Utc, TimeZones.Utc, true, true, false);
-            var security = new Security(SecurityExchangeHours.AlwaysOpen(TimeZones.Utc), subscriptionDataConfig, new Cash(CashBook.AccountCurrency, 0, 1m), SymbolProperties.GetDefault(CashBook.AccountCurrency));
+            var security = new Security(
+                SecurityExchangeHours.AlwaysOpen(TimeZones.Utc),
+                subscriptionDataConfig,
+                new Cash(Currencies.USD, 0, 1m),
+                SymbolProperties.GetDefault(Currencies.USD),
+                ErrorCurrencyConverter.Instance
+            );
             var refTime = DateTime.UtcNow;
 
             return Enumerable
@@ -211,10 +309,8 @@ namespace QuantConnect.Tests.Engine.DataFeeds
                     var ask = new Bar(110, 110, 110, 110);
                     var volume = (i + 1) * initialVolume;
 
-                    return TimeSlice.Create(
+                    return _timeSliceFactory.Create(
                         time,
-                        TimeZones.Utc,
-                        new CashBook(),
                         new List<DataFeedPacket>
                         {
                             new DataFeedPacket(security, subscriptionDataConfig, new List<BaseData>
@@ -223,7 +319,8 @@ namespace QuantConnect.Tests.Engine.DataFeeds
                                 new TradeBar(time, symbol, 100, 100, 110, 106, volume)
                             }),
                         },
-                        new SecurityChanges(Enumerable.Empty<Security>(), Enumerable.Empty<Security>()))
+                        new SecurityChanges(Enumerable.Empty<Security>(), Enumerable.Empty<Security>()),
+                        new Dictionary<Universe, BaseDataCollection>())
                         .Slice;
                 });
         }

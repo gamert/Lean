@@ -46,10 +46,22 @@ namespace QuantConnect.Util
         /// </summary>
         public Composer()
         {
-            Reset();
+            // grab assemblies from current executing directory if not defined by 'composer-dll-directory' configuration key
+            var primaryDllLookupDirectory = new DirectoryInfo(Config.Get("composer-dll-directory", AppDomain.CurrentDomain.BaseDirectory)).FullName;
+            var catalogs = new List<ComposablePartCatalog>
+            {
+                new DirectoryCatalog(primaryDllLookupDirectory, "*.dll"),
+                new DirectoryCatalog(primaryDllLookupDirectory, "*.exe")
+            };
+            if (!string.IsNullOrWhiteSpace(PluginDirectory) && Directory.Exists(PluginDirectory) && new DirectoryInfo(PluginDirectory).FullName != primaryDllLookupDirectory)
+            {
+                catalogs.Add(new DirectoryCatalog(PluginDirectory, "*.dll"));
+            }
+            var aggregate = new AggregateCatalog(catalogs);
+            _compositionContainer = new CompositionContainer(aggregate);
         }
 
-        private CompositionContainer _compositionContainer;
+        private readonly CompositionContainer _compositionContainer;
         private readonly object _exportedValuesLockObject = new object();
         private readonly Dictionary<Type, IEnumerable> _exportedValues = new Dictionary<Type, IEnumerable>();
 
@@ -200,18 +212,6 @@ namespace QuantConnect.Util
         {
             lock(_exportedValuesLockObject)
             {
-                // grab assemblies from current executing directory
-                var catalogs = new List<ComposablePartCatalog>
-                {
-                    new DirectoryCatalog(AppDomain.CurrentDomain.BaseDirectory, "*.dll"),
-                    new DirectoryCatalog(AppDomain.CurrentDomain.BaseDirectory, "*.exe")
-                };
-                if (!string.IsNullOrWhiteSpace(PluginDirectory) && Directory.Exists(PluginDirectory) && new DirectoryInfo(PluginDirectory).FullName != AppDomain.CurrentDomain.BaseDirectory)
-                {
-                    catalogs.Add(new DirectoryCatalog(PluginDirectory, "*.dll"));
-                }
-                var aggregate = new AggregateCatalog(catalogs);
-                _compositionContainer = new CompositionContainer(aggregate);
                 _exportedValues.Clear();
             }
         }

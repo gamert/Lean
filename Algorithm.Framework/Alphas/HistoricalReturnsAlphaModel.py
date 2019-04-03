@@ -21,7 +21,7 @@ from QuantConnect.Indicators import *
 from QuantConnect.Algorithm.Framework.Alphas import *
 from datetime import timedelta
 
-class HistoricalReturnsAlphaModel:
+class HistoricalReturnsAlphaModel(AlphaModel):
     '''Uses Historical returns to create insights.'''
 
     def __init__(self, *args, **kwargs):
@@ -52,7 +52,7 @@ class HistoricalReturnsAlphaModel:
                 if magnitude > 0: direction = InsightDirection.Up
                 if magnitude < 0: direction = InsightDirection.Down
 
-                insights.append(Insight(symbol, InsightType.Price, direction, self.predictionInterval, magnitude, None))
+                insights.append(Insight.Price(symbol, self.predictionInterval, direction, magnitude, None))
 
         return insights
 

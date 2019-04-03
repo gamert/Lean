@@ -120,13 +120,53 @@ namespace QuantConnect.Algorithm.Framework
         /// <param name="slice">The current data slice</param>
         public sealed override void OnFrameworkData(Slice slice)
         {
-            // generate, timestamp and emit insights
-            var insights = Alpha.Update(this, slice)
-                .Select(SetGeneratedAndClosedTimes)
-                .ToList();
+            if (UtcTime >= UniverseSelection.GetNextRefreshTimeUtc())
+            {
+                var universes = UniverseSelection.CreateUniverses(this).ToDictionary(u => u.Configuration.Symbol);
+
+                // remove deselected universes by symbol
+                foreach (var ukvp in UniverseManager)
+                {
+                    var universeSymbol = ukvp.Key;
+                    var qcUserDefined = UserDefinedUniverse.CreateSymbol(ukvp.Value.SecurityType, ukvp.Value.Market);
+                    if (universeSymbol.Equals(qcUserDefined))
+                    {
+                        // prevent removal of qc algorithm created user defined universes
+                        continue;
+                    }
+
+                    Universe universe;
+                    if (!universes.TryGetValue(universeSymbol, out universe))
+                    {
+                        if (ukvp.Value.DisposeRequested)
+                        {
+                            UniverseManager.Remove(universeSymbol);
+                        }
+
+                        // mark this universe as disposed to remove all child subscriptions
+                        ukvp.Value.Dispose();
+                    }
+                }
+
+                // add newly selected universes
+                foreach (var ukvp in universes)
+                {
+                    // note: UniverseManager.Add uses TryAdd, so don't need to worry about duplicates here
+                    UniverseManager.Add(ukvp);
+                }
+            }
+
+            // we only want to run universe selection if there's no data available in the slice
+            if (!slice.HasData)
+            {
+                return;
+            }
+
+            // insight timestamping handled via InsightsGenerated event handler
+            var insights = Alpha.Update(this, slice).ToArray();
 
             // only fire insights generated event if we actually have insights
-            if (insights.Count != 0)
+            if (insights.Length != 0)
             {
                 // debug printing of generated insights
                 if (DebugMode)
@@ -138,7 +178,7 @@ namespace QuantConnect.Algorithm.Framework
             }
 
             // construct portfolio targets from insights
-            var targets = PortfolioConstruction.CreateTargets(this, insights).ToList();
+            var targets = PortfolioConstruction.CreateTargets(this, insights).ToArray();
 
             // set security targets w/ those generated via portfolio construction module
             foreach (var target in targets)
@@ -150,13 +190,13 @@ namespace QuantConnect.Algorithm.Framework
             if (DebugMode)
             {
                 // debug printing of generated targets
-                if (targets.Any())
+                if (targets.Length > 0)
                 {
                     Log($"{Time}: PORTFOLIO: {string.Join(" | ", targets.Select(t => t.ToString()).OrderBy(t => t))}");
                 }
             }
 
-            var riskTargetOverrides = RiskManagement.ManageRisk(this).ToList();
+            var riskTargetOverrides = RiskManagement.ManageRisk(this, targets).ToArray();
 
             // override security targets w/ those generated via risk management module
             foreach (var target in riskTargetOverrides)
@@ -168,14 +208,25 @@ namespace QuantConnect.Algorithm.Framework
             if (DebugMode)
             {
                 // debug printing of generated risk target overrides
-                if (riskTargetOverrides.Any())
+                if (riskTargetOverrides.Length > 0)
                 {
                     Log($"{Time}: RISK: {string.Join(" | ", riskTargetOverrides.Select(t => t.ToString()).OrderBy(t => t))}");
                 }
             }
 
             // execute on the targets, overriding targets for symbols w/ risk targets
-            Execution.Execute(this, riskTargetOverrides.Concat(targets).DistinctBy(pt => pt.Symbol));
+            var riskAdjustedTargets = riskTargetOverrides.Concat(targets).DistinctBy(pt => pt.Symbol).ToArray();
+
+            if (DebugMode)
+            {
+                // only log adjusted targets if we've performed an adjustment
+                if (riskTargetOverrides.Length > 0)
+                {
+                    Log($"{Time}: RISK ADJUSTED TARGETS: {string.Join(" | ", riskAdjustedTargets.Select(t => t.ToString()).OrderBy(t => t))}");
+                }
+            }
+
+            Execution.Execute(this, riskAdjustedTargets);
         }
 
         /// <summary>
@@ -199,7 +250,7 @@ namespace QuantConnect.Algorithm.Framework
         /// Sets the universe selection model
         /// </summary>
         /// <param name="universeSelection">Model defining universes for the algorithm</param>
-        public void SetPortfolioSelection(IUniverseSelectionModel universeSelection)
+        public void SetUniverseSelection(IUniverseSelectionModel universeSelection)
         {
             UniverseSelection = universeSelection;
         }
@@ -240,32 +291,29 @@ namespace QuantConnect.Algorithm.Framework
             RiskManagement = riskManagement;
         }
 
-        private Insight SetGeneratedAndClosedTimes(Insight insight)
+        /// <summary>
+        /// Event invocator for the <see cref="QCAlgorithm.InsightsGenerated"/> event
+        /// </summary>
+        /// <remarks>
+        /// This method is sealed because the framework must be able to force setting of the
+        /// generated and close times before any event handlers are run. Bind directly to the
+        /// <see cref="QCAlgorithm.InsightsGenerated"/> event insead of overriding.
+        /// </remarks>
+        /// <param name="insights">The collection of insights generaed at the current time step</param>
+        protected sealed override void OnInsightsGenerated(IEnumerable<Insight> insights)
         {
-            insight.GeneratedTimeUtc = UtcTime;
-            insight.ReferenceValue = _securityValuesProvider.GetValues(insight.Symbol).Get(insight.Type);
-
-            TimeSpan barSize;
-            Security security;
-            SecurityExchangeHours exchangeHours;
-            if (Securities.TryGetValue(insight.Symbol, out security))
+            // set values not required to be set by alpha models
+            base.OnInsightsGenerated(insights.Select(insight =>
             {
-                exchangeHours = security.Exchange.Hours;
-                barSize = security.Resolution.ToTimeSpan();
-            }
-            else
-            {
-                barSize = insight.Period.ToHigherResolutionEquivalent(false).ToTimeSpan();
-                exchangeHours = MarketHoursDatabase.GetExchangeHours(insight.Symbol.ID.Market, insight.Symbol, insight.Symbol.SecurityType);
-            }
+                insight.GeneratedTimeUtc = UtcTime;
+                insight.ReferenceValue = _securityValuesProvider.GetValues(insight.Symbol).Get(insight.Type);
+                insight.SourceModel = string.IsNullOrEmpty(insight.SourceModel) ? Alpha.GetModelName() : insight.SourceModel;
 
-            var localStart = UtcTime.ConvertFromUtc(exchangeHours.TimeZone);
-            barSize = QuantConnect.Time.Max(barSize, QuantConnect.Time.OneMinute);
-            var barCount = (int) (insight.Period.Ticks / barSize.Ticks);
+                var exchangeHours = MarketHoursDatabase.GetExchangeHours(insight.Symbol.ID.Market, insight.Symbol, insight.Symbol.SecurityType);
+                insight.SetPeriodAndCloseTime(exchangeHours);
 
-            insight.CloseTimeUtc = QuantConnect.Time.GetEndTimeForTradeBars(exchangeHours, localStart, barSize, barCount, false).ConvertToUtc(exchangeHours.TimeZone);
-
-            return insight;
+                return insight;
+            }));
         }
 
         private void CheckModels()

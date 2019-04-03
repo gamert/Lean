@@ -15,7 +15,7 @@
 
 using Python.Runtime;
 using QuantConnect.Data.UniverseSelection;
-using System;
+using QuantConnect.Python;
 using System.Collections.Generic;
 using QuantConnect.Algorithm.Framework.Portfolio;
 
@@ -24,7 +24,7 @@ namespace QuantConnect.Algorithm.Framework.Risk
     /// <summary>
     /// Provides an implementation of <see cref="IRiskManagementModel"/> that wraps a <see cref="PyObject"/> object
     /// </summary>
-    public class RiskManagementModelPythonWrapper : IRiskManagementModel
+    public class RiskManagementModelPythonWrapper : RiskManagementModel
     {
         private readonly dynamic _model;
 
@@ -34,16 +34,7 @@ namespace QuantConnect.Algorithm.Framework.Risk
         /// <param name="model">Model defining how risk is managed</param>
         public RiskManagementModelPythonWrapper(PyObject model)
         {
-            using (Py.GIL())
-            {
-                foreach (var attributeName in new[] { "ManageRisk", "OnSecuritiesChanged" })
-                {
-                    if (!model.HasAttr(attributeName))
-                    {
-                        throw new NotImplementedException($"IRiskManagementModel.{attributeName} must be implemented. Please implement this missing method on {model.GetPythonType()}");
-                    }
-                }
-            }
+            model.ValidateImplementationOf<IRiskManagementModel>();
             _model = model;
         }
 
@@ -51,15 +42,17 @@ namespace QuantConnect.Algorithm.Framework.Risk
         /// Manages the algorithm's risk at each time step
         /// </summary>
         /// <param name="algorithm">The algorithm instance</param>
-        public IEnumerable<IPortfolioTarget> ManageRisk(QCAlgorithmFramework algorithm)
+        /// <param name="targets">The current portfolio targets to be assessed for risk</param>
+        public override IEnumerable<IPortfolioTarget> ManageRisk(QCAlgorithmFramework algorithm, IPortfolioTarget[] targets)
         {
             using (Py.GIL())
             {
-                var targets = _model.ManageRisk(algorithm) as PyObject;
-                foreach (PyObject target in targets)
+                var riskTargetOverrides = _model.ManageRisk(algorithm, targets) as PyObject;
+                foreach (PyObject target in riskTargetOverrides)
                 {
                     yield return target.AsManagedObject(typeof(IPortfolioTarget)) as IPortfolioTarget;
                 }
+                riskTargetOverrides.Destroy();
             }
         }
 
@@ -68,7 +61,7 @@ namespace QuantConnect.Algorithm.Framework.Risk
         /// </summary>
         /// <param name="algorithm">The algorithm instance that experienced the change in securities</param>
         /// <param name="changes">The security additions and removals from the algorithm</param>
-        public void OnSecuritiesChanged(QCAlgorithmFramework algorithm, SecurityChanges changes)
+        public override void OnSecuritiesChanged(QCAlgorithmFramework algorithm, SecurityChanges changes)
         {
             using (Py.GIL())
             {

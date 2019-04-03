@@ -24,9 +24,30 @@ namespace QuantConnect.Algorithm.Framework.Alphas
     /// <summary>
     /// Provides an implementation of <see cref="IAlphaModel"/> that wraps a <see cref="PyObject"/> object
     /// </summary>
-    public class AlphaModelPythonWrapper : IAlphaModel
+    public class AlphaModelPythonWrapper : AlphaModel
     {
         private readonly dynamic _model;
+
+        /// <summary>
+        /// Defines a name for a framework model
+        /// </summary>
+        public override string Name
+        {
+            get
+            {
+                using (Py.GIL())
+                {
+                    // if the model defines a Name property then use that
+                    if (_model.HasAttr("Name"))
+                    {
+                        return _model.Name;
+                    }
+
+                    // if the model does not define a name property, use the python type name
+                    return _model.__class__.__name__;
+                }
+            }
+        }
 
         /// <summary>
         /// Constructor for initialising the <see cref="IAlphaModel"/> class with wrapped <see cref="PyObject"/> object
@@ -54,7 +75,7 @@ namespace QuantConnect.Algorithm.Framework.Alphas
         /// <param name="algorithm">The algorithm instance</param>
         /// <param name="data">The new data available</param>
         /// <returns>The new insights generated</returns>
-        public IEnumerable<Insight> Update(QCAlgorithmFramework algorithm, Slice data)
+        public override IEnumerable<Insight> Update(QCAlgorithmFramework algorithm, Slice data)
         {
             using (Py.GIL())
             {
@@ -63,6 +84,7 @@ namespace QuantConnect.Algorithm.Framework.Alphas
                 {
                     yield return insight.AsManagedObject(typeof(Insight)) as Insight;
                 }
+                insights.Destroy();
             }
         }
 
@@ -71,7 +93,7 @@ namespace QuantConnect.Algorithm.Framework.Alphas
         /// </summary>
         /// <param name="algorithm">The algorithm instance that experienced the change in securities</param>
         /// <param name="changes">The security additions and removals from the algorithm</param>
-        public void OnSecuritiesChanged(QCAlgorithmFramework algorithm, SecurityChanges changes)
+        public override void OnSecuritiesChanged(QCAlgorithmFramework algorithm, SecurityChanges changes)
         {
             using (Py.GIL())
             {

@@ -14,16 +14,15 @@
 */
 
 using System;
-using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
-using QuantConnect.Algorithm.Framework.Alphas;
 using QuantConnect.Algorithm.Framework.Portfolio;
 using QuantConnect.Data;
 using QuantConnect.Data.Consolidators;
 using QuantConnect.Data.UniverseSelection;
 using QuantConnect.Indicators;
 using QuantConnect.Securities;
+using QuantConnect.Orders;
 
 namespace QuantConnect.Algorithm.Framework.Execution
 {
@@ -31,7 +30,7 @@ namespace QuantConnect.Algorithm.Framework.Execution
     /// Execution model that submits orders while the current market prices is at least the configured number of standard
     /// deviations away from the mean in the favorable direction (below/above for buy/sell respectively)
     /// </summary>
-    public class StandardDeviationExecutionModel : IExecutionModel
+    public class StandardDeviationExecutionModel : ExecutionModel
     {
         private readonly int _period;
         private readonly decimal _deviations;
@@ -71,11 +70,11 @@ namespace QuantConnect.Algorithm.Framework.Execution
         /// </summary>
         /// <param name="algorithm">The algorithm instance</param>
         /// <param name="targets">The portfolio targets</param>
-        public void Execute(QCAlgorithmFramework algorithm, IEnumerable<IPortfolioTarget> targets)
+        public override void Execute(QCAlgorithmFramework algorithm, IPortfolioTarget[] targets)
         {
             _targetsCollection.AddRange(targets);
 
-            foreach (var target in _targetsCollection)
+            foreach (var target in _targetsCollection.OrderByMarginImpact(algorithm))
             {
                 var symbol = target.Symbol;
 
@@ -85,12 +84,6 @@ namespace QuantConnect.Algorithm.Framework.Execution
                 // fetch our symbol data containing our STD/SMA indicators
                 SymbolData data;
                 if (!_symbolData.TryGetValue(symbol, out data))
-                {
-                    continue;
-                }
-
-                // ensure we're receiving price data before submitting orders
-                if (data.Security.Price == 0m)
                 {
                     continue;
                 }
@@ -109,14 +102,9 @@ namespace QuantConnect.Algorithm.Framework.Execution
                         algorithm.MarketOrder(symbol, Math.Sign(unorderedQuantity) * orderSize);
                     }
                 }
-
-                // check to see if we're done with this target
-                unorderedQuantity = OrderSizing.GetUnorderedQuantity(algorithm, target);
-                if (unorderedQuantity == 0m)
-                {
-                    _targetsCollection.Remove(target.Symbol);
-                }
             }
+
+            _targetsCollection.ClearFulfilled(algorithm);
         }
 
         /// <summary>
@@ -124,7 +112,7 @@ namespace QuantConnect.Algorithm.Framework.Execution
         /// </summary>
         /// <param name="algorithm">The algorithm instance that experienced the change in securities</param>
         /// <param name="changes">The security additions and removals from the algorithm</param>
-        public void OnSecuritiesChanged(QCAlgorithmFramework algorithm, SecurityChanges changes)
+        public override void OnSecuritiesChanged(QCAlgorithmFramework algorithm, SecurityChanges changes)
         {
             var addedSymbols = new List<Symbol>();
             foreach (var added in changes.AddedSecurities)
@@ -168,27 +156,19 @@ namespace QuantConnect.Algorithm.Framework.Execution
         /// Determines if the current price is more than the configured number of standard deviations
         /// away from the mean in the favorable direction.
         /// </summary>
-        private bool PriceIsFavorable(SymbolData data, decimal unorderedQuantity)
+        protected virtual bool PriceIsFavorable(SymbolData data, decimal unorderedQuantity)
         {
             var deviations = _deviations * data.STD;
             if (unorderedQuantity > 0)
             {
-                var price = data.Security.BidPrice == 0
-                    ? data.Security.Price
-                    : data.Security.BidPrice;
-
-                if (price < data.SMA - deviations)
+                if (data.Security.BidPrice < data.SMA - deviations)
                 {
                     return true;
                 }
             }
             else
             {
-                var price = data.Security.AskPrice == 0
-                    ? data.Security.AskPrice
-                    : data.Security.Price;
-
-                if (price > data.SMA + deviations)
+                if (data.Security.AskPrice > data.SMA + deviations)
                 {
                     return true;
                 }
@@ -200,13 +180,13 @@ namespace QuantConnect.Algorithm.Framework.Execution
         /// <summary>
         /// Determines if it's safe to remove the associated symbol data
         /// </summary>
-        private bool IsSafeToRemove(QCAlgorithmFramework algorithm, Symbol symbol)
+        protected virtual bool IsSafeToRemove(QCAlgorithmFramework algorithm, Symbol symbol)
         {
             // confirm the security isn't currently a member of any universe
             return !algorithm.UniverseManager.Any(kvp => kvp.Value.ContainsMember(symbol));
         }
 
-        class SymbolData
+        protected class SymbolData
         {
             public Security Security { get; }
             public StandardDeviation STD { get; }

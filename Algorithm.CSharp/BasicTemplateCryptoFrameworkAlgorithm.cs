@@ -14,11 +14,11 @@
 */
 
 using System;
-using System.Collections.Generic;
 using QuantConnect.Algorithm.Framework;
 using QuantConnect.Algorithm.Framework.Alphas;
 using QuantConnect.Algorithm.Framework.Execution;
 using QuantConnect.Algorithm.Framework.Portfolio;
+using QuantConnect.Algorithm.Framework.Risk;
 using QuantConnect.Algorithm.Framework.Selection;
 using QuantConnect.Brokerages;
 using QuantConnect.Orders;
@@ -49,15 +49,13 @@ namespace QuantConnect.Algorithm.CSharp
             // Forex, CFD, Equities Resolutions: Tick, Second, Minute, Hour, Daily.
             // Futures Resolution: Tick, Second, Minute
             // Options Resolution: Minute Only.
-
-            SetBrokerageModel(BrokerageName.GDAX, AccountType.Cash);
-
+            
             // set algorithm framework models
-            UniverseSelection = new ManualUniverseSelectionModel(QuantConnect.Symbol.Create("BTCUSD", SecurityType.Crypto, Market.GDAX));
-            Alpha = new ConstantAlphaModel(InsightType.Price, InsightDirection.Up, TimeSpan.FromMinutes(20), 0.025, null);
-            PortfolioConstruction = new EqualWeightingPortfolioConstructionModel();
-            Execution = new ImmediateExecutionModel();
-            RiskManagement = new Algorithm.Framework.Risk.NullRiskManagementModel();
+            SetUniverseSelection(new ManualUniverseSelectionModel(QuantConnect.Symbol.Create("BTCUSD", SecurityType.Crypto, Market.GDAX)));
+            SetAlpha(new ConstantAlphaModel(InsightType.Price, InsightDirection.Up, TimeSpan.FromMinutes(20), 0.025, null));
+            SetPortfolioConstruction(new EqualWeightingPortfolioConstructionModel());
+            SetExecution(new ImmediateExecutionModel());
+            SetRiskManagement(new NullRiskManagementModel());
         }
 
         public override void OnOrderEvent(OrderEvent orderEvent)

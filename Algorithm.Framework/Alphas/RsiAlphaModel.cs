@@ -13,9 +13,7 @@
  * limitations under the License.
 */
 
-using System.Collections;
 using System.Collections.Generic;
-using System.Linq;
 using QuantConnect.Data;
 using QuantConnect.Data.UniverseSelection;
 using QuantConnect.Indicators;
@@ -27,7 +25,7 @@ namespace QuantConnect.Algorithm.Framework.Alphas
     /// Uses Wilder's RSI to create insights. Using default settings, a cross over below 30 or above 70 will
     /// trigger a new insight.
     /// </summary>
-    public class RsiAlphaModel : IAlphaModel
+    public class RsiAlphaModel : AlphaModel
     {
         private readonly Dictionary<Symbol, SymbolData> _symbolDataBySymbol = new Dictionary<Symbol, SymbolData>();
 
@@ -46,6 +44,7 @@ namespace QuantConnect.Algorithm.Framework.Alphas
         {
             _period = period;
             _resolution = resolution;
+            Name = $"{nameof(RsiAlphaModel)}({_period},{_resolution})";
         }
 
         /// <summary>
@@ -55,7 +54,7 @@ namespace QuantConnect.Algorithm.Framework.Alphas
         /// <param name="algorithm">The algorithm instance</param>
         /// <param name="data">The new data available</param>
         /// <returns>The new insights generated</returns>
-        public IEnumerable<Insight> Update(QCAlgorithmFramework algorithm, Slice data)
+        public override IEnumerable<Insight> Update(QCAlgorithmFramework algorithm, Slice data)
         {
             var insights = new List<Insight>();
             foreach (var kvp in _symbolDataBySymbol)
@@ -72,11 +71,11 @@ namespace QuantConnect.Algorithm.Framework.Alphas
                     switch (state)
                     {
                         case State.TrippedLow:
-                            insights.Add(new Insight(symbol, InsightType.Price, InsightDirection.Up, insightPeriod));
+                            insights.Add(Insight.Price(symbol, insightPeriod, InsightDirection.Up));
                             break;
 
                         case State.TrippedHigh:
-                            insights.Add(new Insight(symbol, InsightType.Price, InsightDirection.Down, insightPeriod));
+                            insights.Add(Insight.Price(symbol, insightPeriod, InsightDirection.Down));
                             break;
                     }
                 }
@@ -93,7 +92,7 @@ namespace QuantConnect.Algorithm.Framework.Alphas
         /// </summary>
         /// <param name="algorithm">The algorithm instance that experienced the change in securities</param>
         /// <param name="changes">The security additions and removals from the algorithm</param>
-        public void OnSecuritiesChanged(QCAlgorithmFramework algorithm, SecurityChanges changes)
+        public override void OnSecuritiesChanged(QCAlgorithmFramework algorithm, SecurityChanges changes)
         {
             // clean up data for removed securities
             if (changes.RemovedSecurities.Count > 0)

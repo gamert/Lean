@@ -50,12 +50,7 @@ namespace QuantConnect.Algorithm.Framework.Alphas.Analysis
         /// <summary>
         /// Gets ending time of the analysis period
         /// </summary>
-        public DateTime AnalysisEndTimeUtc { get; }
-
-        /// <summary>
-        /// Gets ending time of the insight, that is, the time it was generated at + the insight period
-        /// </summary>
-        public DateTime InsightPeriodEndTimeUtc { get; }
+        public DateTime AnalysisEndTimeUtc { get; private set; }
 
         /// <summary>
         /// Gets the initial values. These are values of price/volatility at the time the insight was generated
@@ -90,7 +85,7 @@ namespace QuantConnect.Algorithm.Framework.Alphas.Analysis
         /// <param name="insight">The insight to be analyzed</param>
         /// <param name="initialValues">The initial security values from when the insight was generated</param>
         /// <param name="analysisPeriod">The period over which to perform analysis of the insight. This should be
-        /// greater than or equal to <see cref="Insight.Period"/>. Specify null for default, insight.Period</param>
+        /// greater than or equal to <see cref="Alphas.Insight.Period"/>. Specify null for default, insight.Period</param>
         public InsightAnalysisContext(Insight insight, SecurityValues initialValues, TimeSpan analysisPeriod)
         {
             Insight = insight;
@@ -100,11 +95,20 @@ namespace QuantConnect.Algorithm.Framework.Alphas.Analysis
 
             _previousEvaluationTimeUtc = CurrentValues.TimeUtc;
 
-            InsightPeriodEndTimeUtc = insight.GeneratedTimeUtc + insight.Period;
+            // this will always be equal when the InsightManager is initialized with extraAnalysisPeriodRatio == 0
+            // this is the way LEAN run in the cloud and locally, but support for non-zero ratios are left in for posterity
+            // by short-circuiting this here, we guarantee that analysis end time and close time are identical
+            if (analysisPeriod == insight.Period)
+            {
+                AnalysisEndTimeUtc = insight.CloseTimeUtc;
+            }
+            else
+            {
+                var barSize = Time.Max(analysisPeriod.ToHigherResolutionEquivalent(false).ToTimeSpan(), Time.OneMinute);
+                var barCount = (int)(insight.Period.Ticks / barSize.Ticks);
+                AnalysisEndTimeUtc = Time.GetEndTimeForTradeBars(initialValues.ExchangeHours, insight.CloseTimeUtc, analysisPeriod.ToHigherResolutionEquivalent(false).ToTimeSpan(), barCount, false);
+            }
 
-            var barSize = Time.Max(analysisPeriod.ToHigherResolutionEquivalent(false).ToTimeSpan(), Time.OneMinute);
-            var barCount = (int)(insight.Period.Ticks / barSize.Ticks);
-            AnalysisEndTimeUtc = Time.GetEndTimeForTradeBars(initialValues.ExchangeHours, insight.CloseTimeUtc, analysisPeriod.ToHigherResolutionEquivalent(false).ToTimeSpan(), barCount, false);
             _analysisPeriod = AnalysisEndTimeUtc - initialValues.TimeUtc;
         }
 
@@ -115,9 +119,15 @@ namespace QuantConnect.Algorithm.Framework.Alphas.Analysis
         {
             _previousEvaluationTimeUtc = CurrentValues.TimeUtc;
 
-            if (values.TimeUtc >= InsightPeriodEndTimeUtc)
+            if (values.TimeUtc >= Insight.CloseTimeUtc)
             {
                 InsightPeriodClosed = true;
+                if (Insight.Period == Time.EndOfTimeTimeSpan)
+                {
+                    // Special case, see OrderBasedInsightGenerator
+                    AnalysisEndTimeUtc = Insight.CloseTimeUtc;
+                    Insight.Period = Insight.CloseTimeUtc - Insight.GeneratedTimeUtc;
+                }
             }
 
             CurrentValues = values;
@@ -161,6 +171,10 @@ namespace QuantConnect.Algorithm.Framework.Alphas.Analysis
             if (scoreType == InsightScoreType.Magnitude)
             {
                 return Insight.Magnitude.HasValue;
+            }
+            else if (scoreType == InsightScoreType.Direction)
+            {
+                return Insight.Direction != InsightDirection.Flat;
             }
 
             return true;

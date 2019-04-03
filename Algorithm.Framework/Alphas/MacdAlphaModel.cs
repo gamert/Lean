@@ -13,7 +13,6 @@
  * limitations under the License.
 */
 
-using System;
 using System.Collections.Generic;
 using QuantConnect.Data;
 using QuantConnect.Data.Consolidators;
@@ -28,7 +27,7 @@ namespace QuantConnect.Algorithm.Framework.Alphas
     /// used to generate up/down insights if it's stronger than the bounce threshold.
     /// If the MACD signal is within the bounce threshold then a flat price insight is returned.
     /// </summary>
-    public class MacdAlphaModel : IAlphaModel
+    public class MacdAlphaModel : AlphaModel
     {
         private readonly int _fastPeriod;
         private readonly int _slowPeriod;
@@ -60,6 +59,7 @@ namespace QuantConnect.Algorithm.Framework.Alphas
             _movingAverageType = movingAverageType;
             _resolution = resolution;
             _symbolData = new Dictionary<Symbol, SymbolData>();
+            Name = $"{nameof(MacdAlphaModel)}({fastPeriod},{slowPeriod},{signalPeriod},{movingAverageType},{resolution})";
         }
 
         /// <summary>
@@ -68,7 +68,7 @@ namespace QuantConnect.Algorithm.Framework.Alphas
         /// <param name="algorithm">The algorithm instance</param>
         /// <param name="data">The new data available</param>
         /// <returns>The new insights generated</returns>
-        public IEnumerable<Insight> Update(QCAlgorithmFramework algorithm, Slice data)
+        public override IEnumerable<Insight> Update(QCAlgorithmFramework algorithm, Slice data)
         {
             foreach (var sd in _symbolData.Values)
             {
@@ -95,7 +95,7 @@ namespace QuantConnect.Algorithm.Framework.Alphas
                 }
 
                 var insightPeriod = _resolution.ToTimeSpan().Multiply(_fastPeriod);
-                var insight = new Insight(sd.Security.Symbol, InsightType.Price, direction, insightPeriod);
+                var insight = Insight.Price(sd.Security.Symbol, insightPeriod, direction);
                 sd.PreviousDirection = insight.Direction;
                 yield return insight;
             }
@@ -107,10 +107,14 @@ namespace QuantConnect.Algorithm.Framework.Alphas
         /// </summary>
         /// <param name="algorithm">The algorithm instance that experienced the change in securities</param>
         /// <param name="changes">The security additions and removals from the algorithm</param>
-        public void OnSecuritiesChanged(QCAlgorithmFramework algorithm, SecurityChanges changes)
+        public override void OnSecuritiesChanged(QCAlgorithmFramework algorithm, SecurityChanges changes)
         {
             foreach (var added in changes.AddedSecurities)
             {
+                if (_symbolData.ContainsKey(added.Symbol))
+                {
+                    continue;
+                }
                 _symbolData.Add(added.Symbol, new SymbolData(algorithm, added, _fastPeriod, _slowPeriod, _signalPeriod, _movingAverageType, _resolution));
             }
 
@@ -121,6 +125,7 @@ namespace QuantConnect.Algorithm.Framework.Alphas
                 {
                     // clean up our consolidator
                     algorithm.SubscriptionManager.RemoveConsolidator(data.Security.Symbol, data.Consolidator);
+                    _symbolData.Remove(removed.Symbol);
                 }
             }
         }
@@ -139,7 +144,7 @@ namespace QuantConnect.Algorithm.Framework.Alphas
                 Consolidator = algorithm.ResolveConsolidator(security.Symbol, resolution);
                 algorithm.SubscriptionManager.AddConsolidator(security.Symbol, Consolidator);
 
-                MACD = algorithm.MACD(security.Symbol, fastPeriod, slowPeriod, signalPeriod, movingAverageType);
+                MACD = new MovingAverageConvergenceDivergence(fastPeriod, slowPeriod, signalPeriod, movingAverageType);
 
                 algorithm.RegisterIndicator(security.Symbol, MACD, Consolidator);
             }

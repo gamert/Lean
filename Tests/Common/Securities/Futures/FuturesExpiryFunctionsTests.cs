@@ -29,8 +29,12 @@ namespace QuantConnect.Tests.Common.Securities.Futures
     {
         private IDictionary<String, List<Dates>> _data = new Dictionary<String, List<Dates>>();
         private const string Zero = "00:00:00";
+        private const string ElevenOclockMoscowTime = "08:00:00";
+        private const string NineFifteenCentralTime = "14:15:00";
         private const string NineSixteenCentralTime = "14:16:00";
         private const string NineThirtyEasternTime = "13:30:00";
+        private const string FiveOClockPMEasternTime = "21:00:00";
+        private const string EightOClockChicagoTime = "13:00:00";
         private const string TwelveOclock = "12:00:00";
         private const string TwelveOne = "12:01:00";
 
@@ -61,11 +65,11 @@ namespace QuantConnect.Tests.Common.Securities.Futures
                 var func = FuturesExpiryFunctions.FuturesExpiryFunction(security.ID.Symbol);
 
                 //Act
-                var calculated = func(security.ID.Date);
-                var actual = date.LastTrade;
+                var actual = func(security.ID.Date);
+                var expected = date.LastTrade;
 
                 //Assert
-                Assert.AreEqual(calculated, actual, "Failed for symbol: " + symbol);
+                Assert.AreEqual(expected, actual, "Failed for symbol: " + symbol);
             }
         }
 
@@ -76,6 +80,9 @@ namespace QuantConnect.Tests.Common.Securities.Futures
         [TestCase(QuantConnect.Securities.Futures.Currencies.EUR, NineSixteenCentralTime)]
         [TestCase(QuantConnect.Securities.Futures.Currencies.AUD, NineSixteenCentralTime)]
         [TestCase(QuantConnect.Securities.Futures.Currencies.NZD, NineSixteenCentralTime)]
+        [TestCase(QuantConnect.Securities.Futures.Currencies.RUB, ElevenOclockMoscowTime)]
+        [TestCase(QuantConnect.Securities.Futures.Currencies.BRL, NineFifteenCentralTime)]
+        [TestCase(QuantConnect.Securities.Futures.Currencies.MXN, NineSixteenCentralTime)]
         public void CurrenciesExpiryDateFunction_WithDifferentDates_ShouldFollowContract(string symbol, string dayTime)
         {
             Assert.IsTrue(_data.ContainsKey(symbol), "Symbol " + symbol + " not present in Test Data");
@@ -86,14 +93,16 @@ namespace QuantConnect.Tests.Common.Securities.Futures
                 var func = FuturesExpiryFunctions.FuturesExpiryFunction(security.ID.Symbol);
 
                 //Act
-                var calculated = func(security.ID.Date);
-                var actual = date.LastTrade + TimeSpan.Parse(dayTime);
+                var actual = func(security.ID.Date);
+                var expected = date.LastTrade + TimeSpan.Parse(dayTime);
 
                 //Assert
-                Assert.AreEqual(calculated, actual, "Failed for symbol: " + symbol);
+                Assert.AreEqual(expected, actual, "Failed for symbol: " + symbol);
             }
         }
 
+        [TestCase(QuantConnect.Securities.Futures.Energies.PropaneNonLDHMontBelvieu, Zero)]
+        [TestCase(QuantConnect.Securities.Futures.Energies.ArgusPropaneFarEastIndex, Zero)]
         [TestCase(QuantConnect.Securities.Futures.Energies.CrudeOilWTI, Zero)]
         [TestCase(QuantConnect.Securities.Futures.Energies.HeatingOil, Zero)]
         [TestCase(QuantConnect.Securities.Futures.Energies.Gasoline, Zero)]
@@ -108,11 +117,11 @@ namespace QuantConnect.Tests.Common.Securities.Futures
                 var func = FuturesExpiryFunctions.FuturesExpiryFunction(security.ID.Symbol);
 
                 //Act
-                var calculated = func(security.ID.Date);
-                var actual = date.LastTrade + TimeSpan.Parse(dayTime);
+                var actual = func(security.ID.Date);
+                var expected = date.LastTrade + TimeSpan.Parse(dayTime);
 
                 //Assert
-                Assert.AreEqual(calculated, actual, "Failed for symbol: " + symbol);
+                Assert.AreEqual(expected, actual, "Failed for symbol: " + symbol);
             }
         }
 
@@ -130,17 +139,20 @@ namespace QuantConnect.Tests.Common.Securities.Futures
                 var func = FuturesExpiryFunctions.FuturesExpiryFunction(security.ID.Symbol);
 
                 //Act
-                var calculated = func(security.ID.Date);
-                var actual = date.LastTrade + TimeSpan.Parse(dayTime);
+                var actual = func(security.ID.Date);
+                var expected = date.LastTrade + TimeSpan.Parse(dayTime);
 
                 //Assert
-                Assert.AreEqual(calculated, actual, "Failed for symbol: " + symbol);
+                Assert.AreEqual(expected, actual, "Failed for symbol: " + symbol);
             }
         }
 
         [TestCase(QuantConnect.Securities.Futures.Indices.SP500EMini, NineThirtyEasternTime)]
         [TestCase(QuantConnect.Securities.Futures.Indices.NASDAQ100EMini, NineThirtyEasternTime)]
         [TestCase(QuantConnect.Securities.Futures.Indices.Dow30EMini, NineThirtyEasternTime)]
+        [TestCase(QuantConnect.Securities.Futures.Indices.Russell2000EMini, NineThirtyEasternTime)]
+        [TestCase(QuantConnect.Securities.Futures.Indices.Nikkei225Dollar, FiveOClockPMEasternTime)]
+        [TestCase(QuantConnect.Securities.Futures.Indices.VIX, EightOClockChicagoTime)]
         public void IndicesExpiryDateFunction_WithDifferentDates_ShouldFollowContract(string symbol, string dayTime)
         {
             Assert.IsTrue(_data.ContainsKey(symbol), "Symbol " + symbol + " not present in Test Data");
@@ -151,11 +163,11 @@ namespace QuantConnect.Tests.Common.Securities.Futures
                 var func = FuturesExpiryFunctions.FuturesExpiryFunction(security.ID.Symbol);
 
                 //Act
-                var calculated = func(security.ID.Date);
-                var actual = date.LastTrade + TimeSpan.Parse(dayTime);
+                var actual = func(security.ID.Date);
+                var expected = date.LastTrade + TimeSpan.Parse(dayTime);
 
                 //Assert
-                Assert.AreEqual(calculated, actual, "Failed for symbol: " + symbol);
+                Assert.AreEqual(expected, actual, "Failed for symbol: " + symbol);
             }
         }
 
@@ -172,11 +184,11 @@ namespace QuantConnect.Tests.Common.Securities.Futures
                 var func = FuturesExpiryFunctions.FuturesExpiryFunction(security.ID.Symbol);
 
                 //Act
-                var calculated = func(security.ID.Date);
-                var actual = date.LastTrade + TimeSpan.Parse(dayTime);
+                var actual = func(security.ID.Date);
+                var expected = date.LastTrade + TimeSpan.Parse(dayTime);
 
                 //Assert
-                Assert.AreEqual(calculated, actual, "Failed for symbol: " + symbol);
+                Assert.AreEqual(expected, actual, "Failed for symbol: " + symbol);
             }
         }
 
@@ -194,11 +206,30 @@ namespace QuantConnect.Tests.Common.Securities.Futures
                 var func = FuturesExpiryFunctions.FuturesExpiryFunction(security.ID.Symbol);
 
                 //Act
-                var calculated = func(security.ID.Date);
-                var actual = date.LastTrade;
+                var actual = func(security.ID.Date);
+                var expected = date.LastTrade;
 
                 //Assert
-                Assert.AreEqual(calculated, actual, "Failed for symbol: " + symbol);
+                Assert.AreEqual(expected, actual, "Failed for symbol: " + symbol);
+            }
+        }
+
+        [TestCase(QuantConnect.Securities.Futures.Softs.Sugar11CME)]
+        public void SoftsExpiryDateFunction_WithDifferentDates_ShouldFollowContract(string symbol)
+        {
+            Assert.IsTrue(_data.ContainsKey(symbol), "Symbol " + symbol + " not present in Test Data");
+            foreach (var date in _data[symbol])
+            {
+                //Arrange
+                var security = Symbol.CreateFuture(symbol, Market.USA, date.ContractMonth);
+                var func = FuturesExpiryFunctions.FuturesExpiryFunction(security.ID.Symbol);
+
+                //Act
+                var actual = func(security.ID.Date);
+                var expected = date.LastTrade;
+
+                //Assert
+                Assert.AreEqual(expected, actual, "Failed for symbol: " + symbol);
             }
         }
 

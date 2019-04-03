@@ -14,6 +14,7 @@
 from clr import AddReference
 AddReference("System")
 AddReference("QuantConnect.Algorithm")
+AddReference("QuantConnect.Algorithm.Framework")
 AddReference("QuantConnect.Common")
 
 from System import *
@@ -21,11 +22,11 @@ from QuantConnect import *
 from QuantConnect.Orders import *
 from QuantConnect.Algorithm import *
 from QuantConnect.Algorithm.Framework import *
+from QuantConnect.Algorithm.Framework.Alphas import *
 from QuantConnect.Algorithm.Framework.Execution import *
 from QuantConnect.Algorithm.Framework.Portfolio import *
 from QuantConnect.Algorithm.Framework.Risk import *
 from QuantConnect.Algorithm.Framework.Selection import *
-from QuantConnect.Algorithm.Framework.Alphas import *
 from datetime import timedelta
 import numpy as np
 
@@ -55,11 +56,11 @@ class BasicTemplateFrameworkAlgorithm(QCAlgorithmFramework):
         symbols = [ Symbol.Create("SPY", SecurityType.Equity, Market.USA) ]
 
         # set algorithm framework models
-        self.UniverseSelection = ManualUniverseSelectionModel(symbols)
-        self.Alpha = ConstantAlphaModel(InsightType.Price, InsightDirection.Up, timedelta(minutes = 20), 0.025, None)
-        self.PortfolioConstruction = EqualWeightingPortfolioConstructionModel()
-        self.Execution = ImmediateExecutionModel()
-        self.RiskManagement = NullRiskManagementModel()
+        self.SetUniverseSelection(ManualUniverseSelectionModel(symbols))
+        self.SetAlpha(ConstantAlphaModel(InsightType.Price, InsightDirection.Up, timedelta(minutes = 20), 0.025, None))
+        self.SetPortfolioConstruction(EqualWeightingPortfolioConstructionModel())
+        self.SetExecution(ImmediateExecutionModel())
+        self.SetRiskManagement(MaximumDrawdownPercentPerSecurity(0.01))
 
         self.Debug("numpy test >>> print numpy.pi: " + str(np.pi))
 

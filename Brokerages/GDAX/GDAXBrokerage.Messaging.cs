@@ -14,7 +14,6 @@
 */
 
 using Newtonsoft.Json;
-using Newtonsoft.Json.Linq;
 using QuantConnect.Data.Market;
 using QuantConnect.Interfaces;
 using QuantConnect.Orders;
@@ -29,6 +28,7 @@ using RestSharp;
 using System.Text.RegularExpressions;
 using QuantConnect.Logging;
 using QuantConnect.Orders.Fees;
+using QuantConnect.Securities;
 using QuantConnect.Util;
 
 namespace QuantConnect.Brokerages.GDAX
@@ -36,7 +36,7 @@ namespace QuantConnect.Brokerages.GDAX
     public partial class GDAXBrokerage
     {
         #region Declarations
-        private readonly object _tickLocker = new object();
+
         /// <summary>
         /// Collection of partial split messages
         /// </summary>
@@ -60,16 +60,19 @@ namespace QuantConnect.Brokerages.GDAX
         private string _pendingGdaxMarketOrderId;
         private int _pendingLeanMarketOrderId;
 
-        /// <summary>
-        /// Rest client used to call missing conversion rates
-        /// </summary>
-        public IRestClient RateClient { get; set; }
+        private readonly IPriceProvider _priceProvider;
+
         #endregion
 
         /// <summary>
         /// The list of websocket channels to subscribe
         /// </summary>
         protected virtual string[] ChannelNames { get; } = { "heartbeat", "user", "matches" };
+
+        /// <summary>
+        /// Locking object for the Ticks list in the data queue handler
+        /// </summary>
+        protected readonly object TickLocker = new object();
 
         /// <summary>
         /// Constructor for brokerage
@@ -81,13 +84,15 @@ namespace QuantConnect.Brokerages.GDAX
         /// <param name="apiSecret">api secret</param>
         /// <param name="passPhrase">pass phrase</param>
         /// <param name="algorithm">the algorithm instance is required to retreive account type</param>
-        public GDAXBrokerage(string wssUrl, IWebSocket websocket, IRestClient restClient, string apiKey, string apiSecret, string passPhrase, IAlgorithm algorithm)
+        /// <param name="priceProvider">The price provider for missing FX conversion rates</param>
+        public GDAXBrokerage(string wssUrl, IWebSocket websocket, IRestClient restClient, string apiKey, string apiSecret, string passPhrase, IAlgorithm algorithm,
+            IPriceProvider priceProvider)
             : base(wssUrl, websocket, restClient, apiKey, apiSecret, Market.GDAX, "GDAX")
         {
             FillSplit = new ConcurrentDictionary<long, GDAXFill>();
             _passPhrase = passPhrase;
             _algorithm = algorithm;
-            RateClient = new RestClient("http://api.fixer.io/latest?base=usd");
+            _priceProvider = priceProvider;
 
             WebSocket.Open += (sender, args) =>
             {
@@ -200,7 +205,7 @@ namespace QuantConnect.Brokerages.GDAX
                     return;
                 }
 
-                OnMessage(new BrokerageMessageEvent(BrokerageMessageType.Information, -1, ("GDAXWebsocketsBrokerage.OnMessage: Unexpected message format: " + e.Message)));
+                Log.Trace($"GDAXWebsocketsBrokerage.OnMessage: Unexpected message format: {e.Message}");
             }
             catch (Exception exception)
             {
@@ -410,7 +415,14 @@ namespace QuantConnect.Brokerages.GDAX
             var fillPrice = message.Price;
             var fillQuantity = direction == OrderDirection.Sell ? -message.Size : message.Size;
             var isMaker = order.BrokerId[0] == message.MakerOrderId;
-            var orderFee = GetFillFee(symbol, fillPrice, fillQuantity, isMaker);
+
+            var currency = order.PriceCurrency == string.Empty
+                ? _algorithm.Securities[symbol].SymbolProperties.QuoteCurrency
+                : order.PriceCurrency;
+
+            var orderFee = new OrderFee(new CashAmount(
+                GetFillFee(_algorithm.UtcTime, fillPrice, fillQuantity, isMaker),
+                currency));
 
             var orderEvent = new OrderEvent
             (
@@ -457,7 +469,7 @@ namespace QuantConnect.Brokerages.GDAX
         /// <param name="askSize">The ask price</param>
         private void EmitQuoteTick(Symbol symbol, decimal bidPrice, decimal bidSize, decimal askPrice, decimal askSize)
         {
-            lock (_tickLocker)
+            lock (TickLocker)
             {
                 Ticks.Add(new Tick
                 {
@@ -480,7 +492,7 @@ namespace QuantConnect.Brokerages.GDAX
         {
             var symbol = ConvertProductId(message.ProductId);
 
-            lock (_tickLocker)
+            lock (TickLocker)
             {
                 Ticks.Add(new Tick
                 {
@@ -547,7 +559,7 @@ namespace QuantConnect.Brokerages.GDAX
 
             WebSocket.Send(json);
 
-            OnMessage(new BrokerageMessageEvent(BrokerageMessageType.Information, -1, "GDAXBrokerage.Subscribe: Sent subscribe."));
+            Log.Trace("GDAXBrokerage.Subscribe: Sent subscribe.");
         }
 
         /// <summary>
@@ -560,12 +572,13 @@ namespace QuantConnect.Brokerages.GDAX
             var token = _canceller.Token;
             var listener = Task.Factory.StartNew(() =>
             {
-                OnMessage(new BrokerageMessageEvent(BrokerageMessageType.Information, -1, $"GDAXBrokerage.PollLatestTick: started polling for ticks: {symbol.Value.ToString()}"));
+                Log.Trace($"GDAXBrokerage.PollLatestTick: started polling for ticks: {symbol.Value}");
+
                 while (true)
                 {
-                    var rate = GetConversionRate(symbol.Value.Replace("USD", ""));
+                    var rate = GetConversionRate(symbol);
 
-                    lock (_tickLocker)
+                    lock (TickLocker)
                     {
                         var latest = new Tick
                         {
@@ -579,28 +592,22 @@ namespace QuantConnect.Brokerages.GDAX
                     Thread.Sleep(delay);
                     if (token.IsCancellationRequested) break;
                 }
-                OnMessage(new BrokerageMessageEvent(BrokerageMessageType.Information, -1, $"PollLatestTick: stopped polling for ticks: {symbol.Value.ToString()}"));
+
+                Log.Trace($"PollLatestTick: stopped polling for ticks: {symbol.Value}");
             }, token, TaskCreationOptions.LongRunning, TaskScheduler.Default);
         }
 
-        private decimal GetConversionRate(string currency)
+        private decimal GetConversionRate(Symbol symbol)
         {
-            var response = RateClient.Execute(new RestSharp.RestRequest(Method.GET));
-            if (response.StatusCode != System.Net.HttpStatusCode.OK)
+            try
             {
-                OnMessage(new BrokerageMessageEvent(BrokerageMessageType.Error, (int)response.StatusCode, "GetConversionRate: error returned from conversion rate service."));
+                return _priceProvider.GetLastPrice(symbol);
+            }
+            catch (Exception e)
+            {
+                OnMessage(new BrokerageMessageEvent(BrokerageMessageType.Error, 0, $"GetConversionRate: {e.Message}"));
                 return 0;
             }
-
-            var raw = JsonConvert.DeserializeObject<JObject>(response.Content);
-            var rate = raw.SelectToken("rates." + currency).Value<decimal>();
-            if (rate == 0)
-            {
-                OnMessage(new BrokerageMessageEvent(BrokerageMessageType.Error, (int)response.StatusCode, "GetConversionRate: zero value returned from conversion rate service."));
-                return 0;
-            }
-
-            return 1m / rate;
         }
 
         private bool IsSubscribeAvailable(Symbol symbol)
@@ -622,17 +629,11 @@ namespace QuantConnect.Brokerages.GDAX
         /// <summary>
         /// Returns the fee paid for a total or partial order fill
         /// </summary>
-        public static decimal GetFillFee(Symbol symbol, decimal fillPrice, decimal fillQuantity, bool isMaker)
+        public static decimal GetFillFee(DateTime utcTime, decimal fillPrice, decimal fillQuantity, bool isMaker)
         {
-            if (isMaker)
-            {
-                return 0;
-            }
+            var feePercentage = GDAXFeeModel.GetFeePercentage(utcTime, isMaker);
 
-            decimal fee;
-            GDAXFeeModel.Fees.TryGetValue(symbol.Value, out fee);
-
-            return fillPrice * Math.Abs(fillQuantity) * fee;
+            return fillPrice * Math.Abs(fillQuantity) * feePercentage;
         }
     }
 }
